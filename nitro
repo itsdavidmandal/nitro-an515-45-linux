@@ -1,0 +1,67 @@
+#!/bin/bash
+# Fan + keyboard control for Acer Nitro AN515-45 on Linux (needs linuwu_sense loaded).
+# Only modes 2,3,4,5 light up on this model; 0,1,6,7 are dead in firmware.
+B=/sys/module/linuwu_sense/drivers/platform:acer-wmi/acer-wmi
+KB=$B/four_zoned_kb/four_zone_mode
+FAN=$B/nitro_sense/fan_speed
+
+[ -e "$KB" ] || { echo "linuwu_sense not loaded. Run: sudo modprobe linuwu_sense"; exit 1; }
+
+set_kb() { echo "$1" > "$KB" 2>/dev/null || echo "$1" | sudo tee "$KB" >/dev/null; }
+set_fan() { echo "$1" > "$FAN" 2>/dev/null || echo "$1" | sudo tee "$FAN" >/dev/null; }
+
+# ponytail: 8 named colours is plenty, pass R,G,B directly for anything else
+colour() {
+  case "$1" in
+    red) echo "255,0,0";;    green) echo "0,255,0";;  blue) echo "0,0,255";;
+    cyan) echo "0,255,255";; pink) echo "255,0,255";; yellow) echo "255,255,0";;
+    orange) echo "255,80,0";; white) echo "255,255,255";;
+    *,*,*) echo "$1";;
+    *) echo "255,255,255";;
+  esac
+}
+
+case "$1" in
+  off)    set_kb "3,4,0,1,0,0,0";  echo "lights off (brightness 0)";;
+  neon)   set_kb "2,${2:-4},${3:-100},1,0,0,0";             echo "neon";;
+  wave)   set_kb "3,${2:-4},${3:-100},1,0,0,0";             echo "wave";;
+  shift)  set_kb "4,${3:-4},${4:-100},1,$(colour ${2:-white})";  echo "shifting ${2:-white}";;
+  zoom)   set_kb "5,${3:-4},${4:-100},1,$(colour ${2:-white})";  echo "zoom ${2:-white}";;
+  fan)
+    case "$2" in
+      auto|"") set_fan "0,0"; echo "fans: auto";;
+      max)     set_fan "100,100"; echo "fans: 100%";;
+      *)       set_fan "$2,${3:-$2}"; echo "fans: cpu $2% gpu ${3:-$2}%";;
+    esac;;
+  status)
+    H=$(for d in /sys/class/hwmon/hwmon*; do [ "$(cat $d/name 2>/dev/null)" = acer ] && echo $d; done)
+    echo "cpu fan : $(cat $H/fan1_input) rpm"
+    echo "gpu fan : $(cat $H/fan2_input) rpm"
+    echo "temps   : $(( $(cat $H/temp1_input)/1000 ))C $(( $(cat $H/temp2_input)/1000 ))C $(( $(cat $H/temp3_input)/1000 ))C"
+    echo "fan mode: $(cat $FAN)   (0,0 = auto)"
+    echo "keyboard: $(cat $KB)"
+    echo "battery limiter: $(cat $B/nitro_sense/battery_limiter)  (1 = cap at 80%)";;
+  bat)
+    set_v() { echo "$2" > "$B/nitro_sense/$1" 2>/dev/null || echo "$2" | sudo tee "$B/nitro_sense/$1" >/dev/null; }
+    case "$2" in
+      on|1)  set_v battery_limiter 1; echo "battery capped at 80%";;
+      off|0) set_v battery_limiter 0; echo "battery charges to 100%";;
+      *) echo "usage: nitro bat on|off";;
+    esac;;
+  *)
+    cat <<USAGE
+nitro status                      temps, fan rpm, current modes
+nitro fan auto | max | 70 [60]    fan percent (cpu [gpu]), auto = firmware curve
+nitro off                         keyboard lights off
+nitro neon  [speed] [bright]      effects that pick their own colours
+nitro wave  [speed] [bright]
+nitro shift <colour> [speed] [bright]   effects that take YOUR colour
+nitro zoom  <colour> [speed] [bright]
+nitro bat on|off                  cap charging at 80%
+
+colours : red green blue cyan pink yellow orange white, or "R,G,B"
+speed   : 0-9     bright : 0-100
+Static/per-zone colour is NOT possible on AN515-45 - firmware ignores it.
+USAGE
+;;
+esac

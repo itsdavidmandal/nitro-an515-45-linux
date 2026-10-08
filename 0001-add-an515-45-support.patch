@@ -1,0 +1,77 @@
+From d2ea9ff440fe88e3b64435b7fed6d5540a9d9df5 Mon Sep 17 00:00:00 2001
+From: itsdavidmandal <davidramovichmandal@gmail.com>
+Date: Thu, 8 Oct 2026 12:01:16 +0545
+Subject: [PATCH] Add support for Acer Nitro AN515-45
+
+The AN515-45 (AMD Nitro 5) was not matched by any DMI entry, so it got no
+nitro_sense interface and no RGB support at all.
+
+Tested on AN515-45, BIOS V1.08, kernel 7.0.0-34-generic:
+
+- nitro_sense: fan_speed, battery_limiter, battery_calibration and
+  usb_charging all work. Fan write verified via hwmon, CPU 1785 -> 4347 rpm
+  and GPU 2000 -> 5172 rpm on "70,70", returning to auto on "0,0".
+- hwmon exposes both fan RPMs and three temperatures.
+- four_zoned_kb: genuine 4-zone RGB confirmed visually (multi-colour wave),
+  hence .four_zone_kb = 1.
+
+This model uses the legacy interface (.nitro_sense = 2) rather than v4.
+Forcing nitro_v4=1 does give working fan read/write, but platform_profile
+registration then fails with -EIO on all 10 retries and logs ten errors at
+every load, so platform profile is excluded exactly as for the AN515-55.
+
+Firmware limitations observed while testing, not addressed by this patch:
+
+- four_zone_mode modes 0 (static), 1 (breath), 6 (meteor) and 7 (twinkling)
+  do not light the keyboard. Modes 2, 3, 4 and 5 do; 4 and 5 honour the RGB
+  argument while 2 and 3 generate their own colours. On modes 0 and 1 the
+  firmware silently resets speed to 0, which appears to be its way of
+  reporting an unimplemented mode.
+- direction is discarded (reads back 0) for every mode except 3 and 4.
+- per_zone_mode writes are accepted and read back correctly but never
+  render. I also tested with the set_kb_status(0, 0, brightness, ...) call
+  in set_per_zone_color() removed, and with an animated mode already
+  running, in case mode 0 was switching the backlight off before the zone
+  colours landed. The colours still never displayed, so this looks like a
+  firmware limitation rather than a driver bug.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ src/linuwu_sense.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/linuwu_sense.c b/src/linuwu_sense.c
+index 025eacb..425ec28 100644
+--- a/src/linuwu_sense.c
++++ b/src/linuwu_sense.c
+@@ -511,6 +511,11 @@ enum acer_wmi_predator_v4_oc {
+  static struct quirk_entry quirk_acer_nitro_legacy = {
+      .nitro_sense = 2,
+  };
++
++ static struct quirk_entry quirk_acer_nitro_an515_45 = {
++    .nitro_sense = 2,
++    .four_zone_kb = 1,
++ };
+  
+  static struct quirk_entry quirk_acer_nitro_an515_58 = {
+     .nitro_v4 = 1,
+@@ -652,6 +657,15 @@ enum acer_wmi_predator_v4_oc {
+          },
+          .driver_data = &quirk_acer_nitro,
+      },
++     {
++         .callback = dmi_matched,
++         .ident = "Acer Nitro AN515-45",
++         .matches = {
++             DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
++             DMI_MATCH(DMI_PRODUCT_NAME, "Nitro AN515-45"),
++         },
++         .driver_data = &quirk_acer_nitro_an515_45,
++     },
+      {
+          .callback = dmi_matched,
+          .ident = "Acer Nitro AN515-55",
+-- 
+2.43.0
+
